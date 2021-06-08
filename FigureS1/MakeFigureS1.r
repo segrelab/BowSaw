@@ -1,7 +1,7 @@
 # 10 June 2019
 # Script for making the panels for Figure S2
 # Author: Demetrius DiMucci
-
+setwd('C:/Users/ddimucci/Desktop/Manuscripts/BowSaw/Figure_S1/')
 library(randomForest)
 library(plyr)
 
@@ -85,20 +85,41 @@ colnames(z)[1:28] <- values
 
 means <- vector() # average fraction of a rule discovered
 deepest <- vector()
+avgrank = vector()
+rankCompletes = vector()
+bestrank = vector()
 completes <- vector() # how many complete rules discovered
 fracCompletes <- vector() # fraction of all rules that are complete
 lengths <- vector()
 pens <- vector()
 for(i in 1:nrow(z)){
-  ord <- which(z[i,45:52] > -1)
-  rules <- which(z[i,6:13] > -1)
-  means[i] <- mean(as.numeric(z[i,45:52][ord]/z[i,6:13][ord]))
-  completes[i] <- length(which(as.numeric(z[i,45:52][ord]/z[i,6:13][ord]) == 1))
-  fracCompletes[i] <- completes[i]/length(rules)
-  deepest[i] <- max(as.numeric(z[i,53:60][ord]))
+  ord <- which(z[i,45:52] > -1) # how many variables of each rule were recovered by the best bowsaw rule
+  rules <- which(z[i,6:13] > -1) # How many rules were in the simulation
+  means[i] <- mean(as.numeric(z[i,45:52][ord]/z[i,6:13][ord])) # average fraction of the true rules were recovered 
+  completes[i] <- length(which(as.numeric(z[i,45:52][ord]/z[i,6:13][ord]) == 1)) # how many rules were fully recovered at least once
+  completed = (which(as.numeric(z[i,45:52][ord]/z[i,6:13][ord]) == 1))
+  ord2 = ord[completed]
+  fracCompletes[i] <- completes[i]/length(rules) 
+  deepest[i] <- max(as.numeric(z[i,53:60][ord])) # by ranking the extracted bowsaw rule what is the worst rank of any of these best recovery rules
+  avgrank[i] <- mean(as.numeric(z[i,53:60][ord])) # what is the average rank of these recovery rules (relative to all rules extracted)
   lengths[i] <- mean(as.numeric(z[i,6:13][ord]))
   pens[i] <- mean(as.numeric(z[i,14:21][ord]))
+  if(length(ord2) > 0){
+    rankCompletes[i] = median(as.numeric(z[i,53:60][ord2]))
+    bestrank[i] = min(as.numeric(z[i,53:60][ord2]))
+  } else {
+    bestrank[i] = 20000
+    if(i <= nrow(y)){
+      rankCompletes[i] = 20000
+    } else {
+      rankCompletes[i] = 20000
+    }
+  }
 }
+nofind = which(rankCompletes > 2000)
+summary(z$ROCAUC[nofind])
+summary(z$ROCAUC[-nofind])
+
 complete2 <- c(completes,completes1)
 allLengths <- c(lengths,avgLength)
 theDeep = c(deepest,maxDepth)
@@ -150,7 +171,7 @@ corr = round(cor(lm1$fitted.values,allmeans[train]),3)
 plot(allmeans[train],lm1$fitted.values,xlab='Mean Fraction of Rules Recovered',ylab='Fitted Fraction of Rules Recovered',ylim=range(allmeans))
 
 abline(0,1,lwd=3,col=2)
-legend('topleft',legend=paste('r: ',corr))
+#legend('topleft',#legend=paste('r: ',corr))
 
 # 
 inputs <- z[,c(1:5)]
@@ -193,3 +214,131 @@ lm3 = lm(fracCompletes ~ inputs)
 plot(allmeans[train],lm1$fitted.values,xlab='Average Fraction Of True Rule Discovered',ylab='Fitted Fraction')
 plot(completes,lm2$fitted.values,xlab='Number of Complete Rules Discovered ',ylab='Fitted Cout')
 plot(fracCompletes,lm3$fitted.values,xlab='Average Fraction Of True Rule Discovered',ylab='Fitted Fraction')
+
+
+#### Examine the relationship between discovering true rules and model metrics & simulation inputs
+bins = sort(unique(fracCompletes[-seq(10000)]))
+big = seq(10000)
+small = seq(20000)[-big]
+meanROC = vector()
+meanPR = vector()
+features = vector()
+for(i in 1:length(bins)){
+  #hits = which(z$ROCAUC[seq(nrow(y))] <= bins[i] & z$ROCAUC[seq(nrow(y))] > bins[i-1])
+  hits = which(fracCompletes == bins[i])
+  #hits = intersect(hits,small)
+  #meanComp[i] = mean(fracCompletes[hits])
+  meanROC[i] = median(z$ROCAUC[hits])
+  meanPR[i] = median(z$PRAUC[hits])
+  features[i] = median(z$feats[hits])
+  print(c(i,length(hits)))
+  #points(bins[rep(i,length(hits))],z$ROCAUC[hits])
+}
+
+# FRACTION OF TRUE RULES RECOVERED
+pdf(file='Fraction_of_rules_recovered.pdf')
+par(mfrow=c(2,2))
+plot(fracCompletes,z$ROCAUC,xlab='Fraction of True Rules Completely Recovered',ylab='Model ROC-AUC')
+lines(bins,meanROC,col=2,lwd=2)
+##legend("bottomright",#legend=c("Median ROC-AUC"),col=2,pch=16)
+
+
+plot(fracCompletes,z$PRAUC,xlab='Fraction of True Rules Completely Recovered',ylab='Model PR-AUC')
+lines(bins,meanPR,col=2,lwd=2)
+##legend("bottomright",#legend=c("Median PR-AUC"),col=2,pch=16)
+
+plot(fracCompletes,z$feats,ylab='Number of Features',xlab='Fraction of True Rules Completely Recovered',ylim=c(-5,1000))
+lines(bins,features,col=2,lwd=2)
+##legend("bottomright",#legend=c("Median Number of Features"),col=2,pch=16)
+
+boxplot(fracCompletes[small],fracCompletes[big],ylab='Fraction of True Rules Completely Recovered',names=c('200','2000'),xlab='Sample Size')
+dev.off()
+
+mod=lm(fracCompletes ~ z$ROCAUC + z$PRAUC + z$feats + sampes)
+
+
+library(lmvar)
+X = cbind(fracCompletes,z$ROCAUC,z$PRAUC,z$feats,sampes)
+fit = lm(fracCompletes ~ ., as.data.frame(X[,-1]), x = TRUE, y = TRUE)
+cv.lm(fit)
+#################################
+# PROBABILITY OF RECOVERING AT LEAST 1 TRUE RULE
+atleast1 = fracCompletes > 0
+evalmod(scores=z$ROCAUC,labels = atleast1)
+evalmod(scores=z$PRAUC,labels = atleast1)
+
+bins = seq(20)/20
+probs = vector()
+probs[1]=0
+fracRec = vector()
+fracRec[1]=0
+
+
+for(i in 2:length(bins)){
+  hits = which(z$ROCAUC > bins[i-1] & z$ROCAUC <= bins[i])
+  probs[i] = sum(atleast1[hits])/length(hits)
+  fracRec[i] = mean(allmeans[hits])
+}
+plot(bins,probs)
+plot(bins,fracRec)
+
+disc = completes > 0
+calibrate.plot(y = atleast1, p = z$ROCAUC)
+mod = glm(atleast1 ~ z$ROCAUC + z$PRAUC + z$feats + sampes,family='binomial')
+mod2 = randomForest(atleast1 ~.,  z$ROCAUC + z$PRAUC + z$feats + sampes)
+library(popbio)
+pdf(file='Probability_to_recover_minimum_1_rule.pdf')
+par(mfrow=c(2,2))
+logi.hist.plot(z$ROCAUC,atleast1,boxp=FALSE,type="hist",col="gray",xlab='Model ROC-AUC',main='Probability to Recover >= 1 True Rule')
+logi.hist.plot(z$PRAUC,atleast1,boxp=FALSE,type="hist",col="gray",xlab='Model PR-AUC',main='Probability to Recover >= 1 True Rule')
+logi.hist.plot(z$feats,atleast1,boxp=FALSE,type="hist",col="gray",xlab='# Features',main='Probability to Recover >= 1 True Rule')
+sampes = c(rep(2000,10000),rep(200,10000))
+logi.hist.plot(sampes,atleast1,boxp=FALSE,type="hist",col="gray",xlab='Sample Size',main='Probability to Recover >= 1 True Rule')
+logi.hist.plot(mod$fitted.values,atleast1,boxp=FALSE,
+               type="hist",col="gray",xlab='Fitted logistic regression probabilty ',main='Probability to Recover >= 1 True Rule')
+dev.off()
+
+### MEDIAN RANK OF RULES - WHEN RECOVERY DOES OCCUR
+pdf('Median_Rank_when_discovered.pdf')
+par(mfrow=c(2,2))
+bad = which(bestrank > 5000) # abve i assigned an impossible rank to mark which simulations yielded nothing
+plot(z$ROCAUC[-bad],log(bestrank[-bad]),ylab='Log Rank of First Rule',xlab='Model ROC-AUC')
+plot(z$PRAUC[-bad],log(bestrank[-bad]),ylab='Log Rank of First Rule',xlab='Model PR-AUC')
+plot(z$feats[-bad],log(bestrank[-bad]),ylab='Log Rank of First Rule',xlab='Number of Features')
+boxplot(sampes[-bad],(bestrank[-bad]),ylab='Rank of First Rule',xlab='Number of Samples',names=c(200,2000))
+dev.off()
+
+rankMod = lm(log(bestrank[-bad]) ~ z$ROCAUC[-bad] + z$PRAUC[-bad] + z$feats[-bad] + sampes[-bad])
+
+# AVERAGE PARTIAL RECOVERY OF RULES
+pdf('Mean_Partial_Recovery.pdf')
+par(mfrow=c(2,2))
+plot(z$ROCAUC,allmeans[seq(20000)],xlab='Model ROC-AUC',ylab='Mean Partial Recovery')
+plot(z$PRAUC,allmeans[seq(20000)],xlab='Model PR-AUC',ylab='Mean Partial Recovery')
+plot(z$feats,allmeans[seq(20000)],xlab='Number of Features',ylab='Mean Partial Recovery')
+boxplot(allmeans[10001:20000],allmeans[1:10000],xlab='Model ROC-AUC',ylab='Mean Partial Recovery',names=c(200,2000))
+dev.off()
+
+recMod = lm(allmeans[seq(20000)] ~z$ROCAUC + z$PRAUC + z$feats + sampes)
+
+
+############# make a table of the correlations
+correlationTable = matrix(0,ncol=4,nrow=4)
+colnames(correlationTable) = c('ROC-AUC','PR-AUC','N Features','Sample Size')
+
+correlationTable[1,1] = round(cor(z$ROCAUC,fracCompletes),digits=3)
+correlationTable[1,2] = round(cor(z$PRAUC,fracCompletes),digits=3)
+correlationTable[1,3] = round(cor(z$feats,fracCompletes),digits=3)
+correlationTable[1,4] = round(cor(sampes,fracCompletes),digits = 3)
+
+correlationTable[2,1] = round(cor(z$ROCAUC,means),digits=3)
+correlationTable[2,2] = round(cor(z$PRAUC,means),digits=3)
+correlationTable[2,3] = round(cor(z$feats,means),digits=3)
+correlationTable[2,4] = round(cor(sampes,means),digits=3)
+
+correlationTable[3,1] =  round(cor(z$ROCAUC[-bad],-bestrank[-bad]),digits=3)
+correlationTable[3,2] =  round(cor(z$PRAUC[-bad],-bestrank[-bad]),digits=3)
+correlationTable[3,3] =  round(cor(z$feats[-bad],-bestrank[-bad]),digits=3)
+correlationTable[3,4] =  round(cor(sampes[-bad],-bestrank[-bad]),digits=3)
+
+write.csv(correlationTable,file='CorrelationTable.csv')
